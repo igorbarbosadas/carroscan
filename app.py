@@ -17,74 +17,82 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# 🔤 Normalizar texto (remove acento e padroniza)
+# 🔤 Normalizar texto
 def normalizar(texto):
     return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
 
-# 🧠 Melhorar imagem pro OCR
+# 🧠 Melhorar imagem
 def melhorar_imagem(img):
-    img = img.convert("L")  # escala de cinza
+    img = img.convert("L")
     enhancer = ImageEnhance.Contrast(img)
     img = enhancer.enhance(2)
     return img
 
-# 🔍 Identifica página da placa
-def eh_pagina_placa(texto):
-    texto = normalizar(texto.upper())
-    return "RELATORIO DE CARREGAMENTO" in texto and "PLACA" in texto
-
-# 🔍 Identifica página da data
-def eh_pagina_data(texto):
+# 🔍 Identificar página correta
+def eh_mapa_carregamento(texto):
     texto = normalizar(texto.upper())
     return "MAPA DE CARREGAMENTO" in texto
 
+# 🔪 Recorte da placa
+def recortar_placa(img):
+    largura, altura = img.size
+    return img.crop((
+        0,
+        int(altura * 0.15),
+        int(largura * 0.6),
+        int(altura * 0.35)
+    ))
+
+# 🔪 Recorte da data (rodapé)
+def recortar_data(img):
+    largura, altura = img.size
+    return img.crop((
+        0,
+        int(altura * 0.75),
+        largura,
+        altura
+    ))
+
 # 🔎 Extrair placa
-def extrair_placa(texto):
+def extrair_placa_mapa(img):
+    area = recortar_placa(img)
+    area = melhorar_imagem(area)
+    
+    texto = pytesseract.image_to_string(area, config='--psm 6')
     texto = normalizar(texto.upper())
     
-    match = re.search(r'PLACA[:\s]*([A-Z0-9]{7})', texto)
+    match = re.search(r'\b[A-Z]{3}[0-9][A-Z0-9][0-9]{2}\b|\b[A-Z]{3}[0-9]{4}\b', texto)
     
-    if not match:
-        # fallback: qualquer padrão de placa
-        match = re.search(r'\b[A-Z]{3}[0-9][A-Z0-9][0-9]{2}\b|\b[A-Z]{3}[0-9]{4}\b', texto)
-    
-    return match.group(1) if match else "SEM_PLACA"
+    return match.group(0) if match else "SEM_PLACA"
 
-# 📅 Extrair data (IMPRESSO POR)
-def extrair_data(texto):
+# 📅 Extrair data
+def extrair_data_mapa(img):
+    area = recortar_data(img)
+    area = melhorar_imagem(area)
+    
+    texto = pytesseract.image_to_string(area, config='--psm 6')
     texto = normalizar(texto.upper()).replace("0", "O")
     
     match = re.search(r'IMPRESSO.*?(\d{2})/(\d{2})/\d{4}', texto)
     
     if match:
-        dia = match.group(1)
-        mes = match.group(2)
-        return f"{dia}.{mes}"
+        return f"{match.group(1)}.{match.group(2)}"
     
     return "SEM_DATA"
 
-# 🚀 Processar PDF
+# 🚀 Processamento principal
 def processar_pdf(file_bytes):
     imagens = convert_from_bytes(file_bytes)
     
-    placa = "SEM_PLACA"
-    data = "SEM_DATA"
-    
     for img in imagens:
-        img = melhorar_imagem(img)
+        texto_full = pytesseract.image_to_string(img, config='--psm 6')
         
-        texto = pytesseract.image_to_string(img, config='--psm 6')
-        
-        # DEBUG (se precisar ver o que OCR lê)
-        # st.text(texto[:500])
-        
-        if placa == "SEM_PLACA" and eh_pagina_placa(texto):
-            placa = extrair_placa(texto)
-        
-        if data == "SEM_DATA" and eh_pagina_data(texto):
-            data = extrair_data(texto)
+        if eh_mapa_carregamento(texto_full):
+            placa = extrair_placa_mapa(img)
+            data = extrair_data_mapa(img)
+            return placa, data
     
-    return placa, data
+    return "SEM_PLACA", "SEM_DATA"
 
 # 🧾 Execução
 if uploaded_files:
@@ -100,7 +108,7 @@ if uploaded_files:
         
         st.success(f"{file.name} → {novo_nome}")
     
-    # 🔹 Se for 1 arquivo
+    # 🔹 1 arquivo
     if len(resultados) == 1:
         _, novo_nome, file_bytes = resultados[0]
         
@@ -111,7 +119,7 @@ if uploaded_files:
             mime="application/pdf"
         )
     
-    # 🔹 Se for vários → ZIP
+    # 🔹 vários arquivos
     else:
         zip_buffer = io.BytesIO()
         
