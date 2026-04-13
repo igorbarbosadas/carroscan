@@ -17,7 +17,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# 🔤 Normalizar texto
+# 🔤 Normalizar texto (remove acento)
 def normalizar(texto):
     return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
 
@@ -28,49 +28,37 @@ def melhorar_imagem(img):
     img = enhancer.enhance(2)
     return img
 
-# 🔍 Identificar página correta
+# 🔍 Detecta página do mapa (flexível)
 def eh_mapa_carregamento(texto):
     texto = normalizar(texto.upper())
-    return "MAPA DE CARREGAMENTO" in texto
+    return "MAPA" in texto and "CARREGAMENTO" in texto
 
-# 🔪 Recorte da placa
+# 🔪 Recorte placa
 def recortar_placa(img):
     largura, altura = img.size
-    return img.crop((
-        0,
-        int(altura * 0.15),
-        int(largura * 0.6),
-        int(altura * 0.35)
-    ))
+    return img.crop((0, int(altura * 0.15), int(largura * 0.6), int(altura * 0.35)))
 
-# 🔪 Recorte da data (rodapé)
+# 🔪 Recorte data
 def recortar_data(img):
     largura, altura = img.size
-    return img.crop((
-        0,
-        int(altura * 0.75),
-        largura,
-        altura
-    ))
+    return img.crop((0, int(altura * 0.75), largura, altura))
 
 # 🔎 Extrair placa
-def extrair_placa_mapa(img):
-    area = recortar_placa(img)
-    area = melhorar_imagem(area)
+def extrair_placa(img):
+    area = melhorar_imagem(recortar_placa(img))
     
-    texto = pytesseract.image_to_string(area, config='--psm 6')
+    texto = pytesseract.image_to_string(area, config='--oem 3 --psm 6')
     texto = normalizar(texto.upper())
     
     match = re.search(r'\b[A-Z]{3}[0-9][A-Z0-9][0-9]{2}\b|\b[A-Z]{3}[0-9]{4}\b', texto)
     
     return match.group(0) if match else "SEM_PLACA"
 
-# 📅 Extrair data
-def extrair_data_mapa(img):
-    area = recortar_data(img)
-    area = melhorar_imagem(area)
+# 📅 Extrair data (Impresso por)
+def extrair_data(img):
+    area = melhorar_imagem(recortar_data(img))
     
-    texto = pytesseract.image_to_string(area, config='--psm 6')
+    texto = pytesseract.image_to_string(area, config='--oem 3 --psm 6')
     texto = normalizar(texto.upper()).replace("0", "O")
     
     match = re.search(r'IMPRESSO.*?(\d{2})/(\d{2})/\d{4}', texto)
@@ -84,12 +72,25 @@ def extrair_data_mapa(img):
 def processar_pdf(file_bytes):
     imagens = convert_from_bytes(file_bytes)
     
+    # 🔍 Primeira tentativa (página correta)
     for img in imagens:
-        texto_full = pytesseract.image_to_string(img, config='--psm 6')
+        texto_full = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
+        
+        # DEBUG (ative se precisar)
+        # st.image(img)
+        # st.text(texto_full[:500])
         
         if eh_mapa_carregamento(texto_full):
-            placa = extrair_placa_mapa(img)
-            data = extrair_data_mapa(img)
+            placa = extrair_placa(img)
+            data = extrair_data(img)
+            return placa, data
+    
+    # 🔥 Fallback (garantia total)
+    for img in imagens:
+        placa = extrair_placa(img)
+        data = extrair_data(img)
+        
+        if placa != "SEM_PLACA" or data != "SEM_DATA":
             return placa, data
     
     return "SEM_PLACA", "SEM_DATA"
