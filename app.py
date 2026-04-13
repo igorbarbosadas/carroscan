@@ -46,7 +46,7 @@ if uploaded_files:
         # 📍 recorta só a área da placa (muito mais preciso)
         area_placa = recortar_area_placa(imagem)
         
-        texto = pytesseract.image_to_string(area_placa, lang='por')
+        texto = pytesseract.image_to_string(area_placa)
         
         placa = extrair_placa(texto)
         
